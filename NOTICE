@@ -1,0 +1,27 @@
+sandbox-runtime (Rust)
+Copyright 2026 defims and contributors
+
+This project is a Rust implementation of the sandbox-runtime mechanism,
+maintained as a line-level port of Anthropic's TypeScript project.
+
+This product includes software developed as part of:
+
+  sandbox-runtime
+  https://github.com/anthropic-experimental/sandbox-runtime
+  Copyright 2025 Anthropic
+  Licensed under the Apache License, Version 2.0
+
+The initial Rust implementation was based on the community port by
+wangyedev (https://github.com/wangyedev/sandbox-runtime-rs), itself
+derived from the Anthropic TypeScript project.
+
+A reference snapshot of the upstream TypeScript sources is vendored in
+srt_legacy_ts/ (Apache-2.0, see srt_legacy_ts/README.md for the pinned
+version and commit).
+
+Modifications from the initial community port are recorded in
+CHANGELOG.md.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. You may obtain
+a copy of the License at http://www.apache.org/licenses/LICENSE-2.0

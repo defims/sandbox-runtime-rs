@@ -204,13 +204,9 @@ fn validate_domain_pattern(pattern: &str) -> Result<(), SandboxError> {
         .into());
     }
 
-    // Check for just wildcard
+    // Bare "*" is valid: upstream sandbox-runtime semantics (allow/deny everything).
     if pattern == "*" {
-        return Err(ConfigError::InvalidDomainPattern {
-            pattern: pattern.to_string(),
-            reason: "wildcard-only patterns are not allowed".to_string(),
-        }
-        .into());
+        return Ok(());
     }
 
     // Check for too broad patterns like *.com
@@ -257,6 +253,11 @@ fn validate_domain_pattern(pattern: &str) -> Result<(), SandboxError> {
 
 /// Check if a hostname matches a domain pattern.
 pub fn matches_domain_pattern(hostname: &str, pattern: &str) -> bool {
+    // Bare "*" matches everything (upstream sandbox-runtime semantics).
+    if pattern == "*" {
+        return true;
+    }
+
     let hostname_lower = hostname.to_lowercase();
     let pattern_lower = pattern.to_lowercase();
 
@@ -297,11 +298,17 @@ mod tests {
         assert!(validate_domain_pattern("*.example.com").is_ok());
         assert!(validate_domain_pattern("localhost").is_ok());
         assert!(validate_domain_pattern("api.github.com").is_ok());
+        assert!(validate_domain_pattern("*").is_ok());
 
         // Invalid patterns
         assert!(validate_domain_pattern("").is_err());
-        assert!(validate_domain_pattern("*").is_err());
         assert!(validate_domain_pattern("*.com").is_err());
         assert!(validate_domain_pattern("example.com:8080").is_err());
+    }
+
+    #[test]
+    fn test_bare_wildcard_matching() {
+        assert!(matches_domain_pattern("anything.example.com", "*"));
+        assert!(matches_domain_pattern("example.com", "*"));
     }
 }

@@ -195,10 +195,6 @@ fn generate_filesystem_rules(profile: &mut String, config: &FilesystemConfig) {
     // Add mandatory deny rules for dangerous files/directories
     profile.push_str("\n; Mandatory deny (dangerous files)\n");
     generate_mandatory_deny_rules(profile, config);
-
-    // Deny moves/renames to prevent circumventing write restrictions
-    profile.push_str("\n; Block file moves/renames\n");
-    profile.push_str("(deny file-write-unlink)\n");
 }
 
 /// Generate mandatory deny rules for dangerous files and directories.

@@ -128,12 +128,28 @@ async fn main() -> ExitCode {
 
     tracing::debug!("Wrapped command: {}", wrapped_command);
 
+    // Inject proxy env vars when the network is restricted, so proxy-aware
+    // tools (curl, git, pip...) reach the allowlist filter. With no domain
+    // lists configured the profile allows direct egress and no proxy is used.
+    let network_restricted = manager
+        .get_config()
+        .map(|c| {
+            !c.network.allowed_domains.is_empty() || !c.network.denied_domains.is_empty()
+        })
+        .unwrap_or(false);
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c").arg(&wrapped_command);
+    if network_restricted {
+        for (k, v) in sandbox_runtime::sandbox::macos::generate_proxy_env(
+            manager.get_proxy_port().unwrap_or(0),
+            manager.get_socks_proxy_port().unwrap_or(0),
+        ) {
+            cmd.env(k, v);
+        }
+    }
+
     // Execute the wrapped command
-    let status = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(&wrapped_command)
-        .status()
-        .await;
+    let status = cmd.status().await;
 
     // Cleanup: signal control fd reader to stop and reset sandbox manager
     if let Some(shutdown_tx) = control_fd_shutdown {

@@ -41,12 +41,17 @@ pub fn wrap_command(
     Ok((wrapped, log_tag))
 }
 
+/// Per-process counter ensuring concurrent wraps never overwrite each other's profile.
+static PROFILE_SEQ: once_cell::sync::Lazy<std::sync::atomic::AtomicU64> =
+    once_cell::sync::Lazy::new(|| std::sync::atomic::AtomicU64::new(0));
+
 /// Write the profile to a temporary file.
 fn write_profile_to_temp(profile: &str) -> Result<String, SandboxError> {
     use std::io::Write;
 
     let temp_dir = std::env::temp_dir();
-    let filename = format!("srt-profile-{}.sb", std::process::id());
+    let seq = PROFILE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let filename = format!("srt-profile-{}-{}.sb", std::process::id(), seq);
     let path = temp_dir.join(filename);
 
     let mut file = std::fs::File::create(&path)?;
@@ -58,11 +63,14 @@ fn write_profile_to_temp(profile: &str) -> Result<String, SandboxError> {
 /// Clean up temporary profile files.
 pub fn cleanup_temp_profiles() {
     let temp_dir = std::env::temp_dir();
-    let pattern = format!("srt-profile-{}.sb", std::process::id());
-    let path = temp_dir.join(pattern);
+    let prefix = format!("srt-profile-{}-", std::process::id());
 
-    if path.exists() {
-        let _ = std::fs::remove_file(&path);
+    if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
     }
 }
 

@@ -1,6 +1,15 @@
-# sandbox-runtime-rs
+# sandbox-runtime-rs (defims fork)
 
 OS-level sandboxing tool for enforcing filesystem and network restrictions on arbitrary processes without containerization.
+
+> **defims fork note**: This is the maintained fork used by the [picrab](https://github.com/defims/picrab)
+> coding agent (and the moho-mate desktop host). It is developed as a line-level Rust port of
+> [anthropic-experimental/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime)
+> (baseline v0.0.75 — see [UPSTREAM_BASE.md](UPSTREAM_BASE.md) for the alignment policy and the
+> deviation ledger). The TypeScript reference snapshot is vendored in [srt_legacy_ts/](srt_legacy_ts/).
+> Licensed Apache-2.0 (see [NOTICE](NOTICE)); picrab integrates this crate as a library — see
+> `examples/library_smoke.rs` for the embedding pattern.
+
 
 ## Features
 
@@ -488,4 +497,4 @@ This project is a Rust port of [sandbox-runtime](https://github.com/anthropic-ex
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
