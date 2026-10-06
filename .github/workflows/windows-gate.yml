@@ -1,0 +1,113 @@
+# Windows backend gate: MSVC compile + unit tests + embedded-helper build
+# + sandbox smoke (provision → exec probes → cleanup) on a real runner.
+#
+# Local dev gates on macOS/Linux: host tests + cargo check
+# --target x86_64-pc-windows-gnu (the msvc target cannot run the
+# libsqlite3-sys C build off-Windows — this workflow is the authoritative
+# MSVC gate).
+
+name: windows-gate
+
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths-ignore: ["srt_legacy_ts/**", "**.md"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  msvc-gate:
+    name: MSVC check + tests + clippy
+    runs-on: windows-latest
+    env:
+      # Embed the helper built below into the host build (single-artifact
+      # distribution contract; see build.rs).
+      SRT_WIN_EXE: ${{ github.workspace }}/target/release/srt-win.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-05
+          components: clippy, rustfmt
+
+      - name: Build srt-win helper (the embed artifact, must exist first)
+        run: cargo build --release -p srt-win
+
+      - name: Tests (host target, embedded helper)
+        run: cargo test --workspace
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  unix-regression:
+    name: unix regression (behavior unchanged)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-05
+
+      - name: Tests (host, incl. cross-platform windows-module logic)
+        run: cargo test --workspace
+
+      - name: windows-gnu cross-check
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          cargo check --workspace --target x86_64-pc-windows-gnu
+
+  smoke:
+    name: sandbox smoke (real Windows)
+    runs-on: windows-latest
+    needs: msvc-gate
+    env:
+      SRT_WIN_EXE: ${{ github.workspace }}/target/release/srt-win.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-05
+
+      - name: Build srt-win helper + host binary (with embedded helper)
+        run: |
+          cargo build --release -p srt-win
+          cargo build --release --bin srt
+
+      # Fork install path: --windows-install -> srt-win (self-elevating; a
+      # no-op on GH runners, which are admin) -> machine-store extraction.
+      - name: Fork install
+        shell: pwsh
+        run: ./target/release/srt.exe --windows-install --force
+
+      - name: Fork readiness status (single spawn {user, wfp})
+        shell: pwsh
+        run: |
+          $json = ./target/release/srt.exe --srt-win status | ConvertFrom-Json
+          if (-not $json.user.exists) { throw "sandbox user not provisioned" }
+          if ($json.wfp.state -eq "absent") { throw "wfp filters absent" }
+
+      # Helper subprocess tests: exec probes + kill propagation, driven
+      # against the standalone helper (fixed test-only sublayer GUID).
+      - name: Vendored exec probes (deny-read / allow-write / fence)
+        shell: pwsh
+        run: ./vendor/srt-win/ci/smoke-exec.ps1 ./target/release/srt-win.exe
+
+      - name: Vendored kill-propagation probe (cancel leaves no orphans)
+        shell: pwsh
+        run: ./vendor/srt-win/ci/smoke-kill.ps1 ./target/release/srt-win.exe
+
+      - name: Vendored smoke cleanup (test sublayer)
+        if: always()
+        shell: pwsh
+        run: ./vendor/srt-win/ci/cleanup.ps1 ./target/release/srt-win.exe
+
+      # Fork uninstall path: filters + account removed, bin store emptied.
+      - name: Fork uninstall cleans up
+        shell: pwsh
+        run: ./target/release/srt.exe --windows-uninstall
