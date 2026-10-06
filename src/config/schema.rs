@@ -316,7 +316,7 @@ pub fn matches_domain_pattern(hostname: &str, pattern: &str) -> bool {
 
     if pattern_lower.starts_with("*.") {
         // Wildcard pattern: *.example.com matches api.example.com but NOT example.com
-        let base_domain = pattern_lower.strip_prefix("*").unwrap_or(&pattern_lower);
+        let base_domain = pattern_lower.strip_prefix("*.").unwrap_or(&pattern_lower);
         hostname_lower.ends_with(&format!(".{}", base_domain))
     } else {
         // Exact match
