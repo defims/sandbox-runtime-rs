@@ -47,7 +47,7 @@ async fn main() {
 
     // Inject proxy env only when network is restricted; for network-off the
     // profile allows direct egress and the proxies are unused but harmless to omit.
-    let (ok, out) = run_wrapped(
+    let (_, out) = run_wrapped(
         &manager
             .wrap_with_sandbox(
                 "cat ~/.ssh/known_hosts 2>&1 | head -1; echo rc=$?",
@@ -66,7 +66,7 @@ async fn main() {
         failures.push("deny_read ~/.ssh NOT blocked".to_string());
     }
 
-    let (ok, out) = run_wrapped(
+    let (_, out) = run_wrapped(
         &manager
             .wrap_with_sandbox(
                 "echo hi > /tmp/srt-lib-smoke.txt && cat /tmp/srt-lib-smoke.txt && rm /tmp/srt-lib-smoke.txt && echo RM_OK || echo RM_BLOCKED",

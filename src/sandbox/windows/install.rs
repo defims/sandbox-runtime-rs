@@ -173,10 +173,7 @@ pub fn run_uninstall(sublayer_guid: Option<&str>, keep_user: bool) -> InstallOut
     if code != EXIT_OK {
         return InstallOutcome {
             code,
-            message: explain_install_exit(
-                code,
-                &String::from_utf8_lossy(&out.stderr).trim().to_string(),
-            ),
+            message: explain_install_exit(code, String::from_utf8_lossy(&out.stderr).trim()),
         };
     }
     // Best-effort: remove every extracted helper copy.

@@ -21,7 +21,12 @@ pub fn normalize_fs_path(raw: &str, cwd: &Path) -> Result<PathBuf, SandboxError>
         // `~` unresolved: expand_home looked for $HOME which is usually
         // unset on Windows — use %USERPROFILE%.
         match std::env::var_os("USERPROFILE") {
-            Some(profile) => PathBuf::from(profile).join(&expanded[1..].trim_start_matches(['/', '\\'])),
+            Some(profile) => PathBuf::from(profile).join(
+                expanded
+                    .strip_prefix('~')
+                    .unwrap_or(&expanded)
+                    .trim_start_matches(['/', '\\']),
+            ),
             None => return Err(SandboxError::ExecutionFailed(format!(
                 "cannot resolve path {raw:?}: no HOME or USERPROFILE"
             ))),
@@ -191,11 +196,11 @@ mod tests {
     }
 
     #[test]
-    fn glob_chars_routed_to_expansion() {
-        // No filesystem needed: a non-matching glob expands to nothing and
-        // a literal passes through even when missing.
+    fn literal_path_passes_through_even_when_missing() {
+        // Non-glob entries pass through normalized; existence is NOT
+        // required at expansion time.
         let out = expand_fs_paths(&["C:/no/such/path".to_string()], &cwd(), Mode::Grant).unwrap();
-        assert!(out.is_empty() || out[0].ends_with("no/such/path") == false || true);
-        let _ = out;
+        assert_eq!(out.len(), 1);
+        assert!(out[0].to_string_lossy().ends_with("no/such/path"));
     }
 }

@@ -100,8 +100,6 @@ fn run_acl(spawn: &SrtWinSpawn, args: &[&str], stdin: &str) -> Result<(), Sandbo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn holder_pid_is_threaded_into_args() {
         // Arg construction is the logic here; assert via a dry wrapper of

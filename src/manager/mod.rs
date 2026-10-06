@@ -374,8 +374,7 @@ impl SandboxManager {
             let deny_write_s = to_str(deny_write);
             let session_cfg = self.get_config();
             let session_cfg = session_cfg.unwrap_or(config.clone());
-            let allow_write_s: Vec<String> =
-                session_cfg.filesystem.allow_write.iter().cloned().collect();
+            let allow_write_s: Vec<String> = session_cfg.filesystem.allow_write.to_vec();
             let cwd = std::env::current_dir()?;
             let params = crate::sandbox::windows::wrap::WrapParams {
                 spawn: &session.spawn,

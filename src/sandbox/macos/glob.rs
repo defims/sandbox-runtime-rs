@@ -8,6 +8,7 @@
 /// - `?` matches any single character except `/`
 /// - `{a,b}` matches either `a` or `b`
 /// - Special regex characters are escaped
+#[allow(clippy::while_let_on_iterator)] // upstream-ported porting-sensitive loop shape
 pub fn glob_to_regex(pattern: &str) -> String {
     let mut result = String::with_capacity(pattern.len() * 2);
     result.push('^');

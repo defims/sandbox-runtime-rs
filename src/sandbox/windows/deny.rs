@@ -131,7 +131,7 @@ mod tests {
         std::fs::write(proj.join("safe.txt"), b"x").unwrap();
         std::fs::write(proj.join(".BASHRC"), b"case-insensitive match").unwrap();
 
-        let (targets, note) = discover_dangerous_targets(&[proj.clone()], 3, None);
+        let (targets, note) = discover_dangerous_targets(std::slice::from_ref(&proj), 3, None);
         assert!(note.is_empty());
         let lowered: Vec<String> = targets
             .iter()
@@ -171,7 +171,7 @@ mod tests {
         std::fs::create_dir_all(&deep).unwrap();
         std::fs::write(deep.join(".npmrc"), b"x").unwrap();
 
-        let (targets, _) = discover_dangerous_targets(&[tmp.clone()], 1, None);
+        let (targets, _) = discover_dangerous_targets(std::slice::from_ref(&tmp), 1, None);
         assert!(targets.is_empty());
 
         let _ = std::fs::remove_dir_all(&tmp);

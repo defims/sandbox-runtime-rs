@@ -109,7 +109,7 @@ fn bin_dir_in(store_base: &Path) -> PathBuf {
 
 /// Exact-hash filename for the given hex sha256.
 pub fn exe_path_for_hash(hash: &str) -> Result<PathBuf, SandboxError> {
-    Ok(bin_dir()?.join(format!("srt-win-{hash}.exe")))
+    Ok(exe_in(&bin_dir()?, hash))
 }
 
 /// Pure helper: exact-hash exe filename under a given bin dir.
