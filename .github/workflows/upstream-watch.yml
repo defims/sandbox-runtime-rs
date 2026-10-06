@@ -1,0 +1,34 @@
+name: upstream-watch
+
+# Watch anthropic-experimental/sandbox-runtime releases and open an issue
+# when a new version appears (see UPSTREAM_BASE.md for the policy).
+
+on:
+  schedule:
+    - cron: "23 3 * * *" # daily
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check latest upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST=$(curl -sf https://api.github.com/repos/anthropic-experimental/sandbox-runtime/releases/latest | jq -r .tag_name)
+          BASE=$(sed -n 's/^| Upstream version | \(.*\) |$/\1/p' UPSTREAM_BASE.md)
+          echo "latest=$LATEST baseline=$BASE"
+          if [ -n "$LATEST" ] && [ "$LATEST" != "$BASE" ]; then
+            exists=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "upstream $LATEST in:title" --json number --jq 'length')
+            if [ "$exists" = "0" ]; then
+              gh issue create --repo "$GITHUB_REPOSITORY" \
+                --title "upstream sandbox-runtime released $LATEST (baseline: $BASE)" \
+                --body "New upstream release [$LATEST](https://github.com/anthropic-experimental/sandbox-runtime/releases/tag/$LATEST). Evaluate the diff against the vendored snapshot, port in-scope changes, run the regression harness, then update UPSTREAM_BASE.md and tag aligned-srt-$LATEST. See UPSTREAM_BASE.md for policy."
+            fi
+          fi

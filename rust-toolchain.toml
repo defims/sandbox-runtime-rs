@@ -1,0 +1,8 @@
+# Pinned to match the primary consumer (picrab) so local fork builds use
+# exactly the toolchain the consumer's locked graph validated, and so the
+# edition-2024 srt-win member (vendor/srt-win, requires Rust >= 1.85) has a
+# single validated compiler everywhere. Bump only together with picrab's
+# pin and re-run both repos' gates.
+[toolchain]
+channel = "nightly-2026-07-05"
+components = ["rustfmt", "clippy"]

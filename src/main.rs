@@ -17,6 +17,20 @@ use sandbox_runtime::utils::init_debug_logging;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // Multicall dispatch: `argv[1] == --srt-win` routes into the vendored
+    // srt-win CLI. Must run before clap sees argv. run_from_args takes the
+    // FULL argv and strips the sentinel itself; the sentinel also survives
+    // srt-win's internal re-spawns (runner hop, UAC hop), which key on
+    // current_exe() — so this dispatcher routes those back too.
+    #[cfg(windows)]
+    {
+        let mut it = std::env::args_os();
+        let _argv0 = it.next();
+        if it.next().as_deref() == Some(std::ffi::OsStr::new(srt_win::SRT_WIN_DISPATCH_ARG1)) {
+            std::process::exit(srt_win::run_from_args(std::env::args_os()));
+        }
+    }
+
     let cli = Cli::parse_args();
 
     // Initialize logging

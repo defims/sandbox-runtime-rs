@@ -19,6 +19,10 @@ A reference snapshot of the upstream TypeScript sources is vendored in
 srt_legacy_ts/ (Apache-2.0, see srt_legacy_ts/README.md for the pinned
 version and commit).
 
+The Windows helper crate is vendored verbatim from the same upstream
+project in vendor/srt-win/ (Apache-2.0; see vendor/srt-win/PROVENANCE.md
+for the pinned commit).
+
 Modifications from the initial community port are recorded in
 CHANGELOG.md.
 

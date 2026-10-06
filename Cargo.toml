@@ -11,6 +11,22 @@ keywords = ["sandbox", "security", "isolation", "macos", "linux"]
 categories = ["command-line-utilities", "development-tools"]
 exclude = [".upstream-cache/", ".upstream-sync/"]
 
+[workspace]
+# vendor/srt-win is the verbatim Windows helper crate vendored from
+# anthropics/sandbox-runtime (see vendor/srt-win/PROVENANCE.md). It is
+# `#![cfg(windows)]` and compiles to an empty crate on macOS/Linux, so the
+# unix build graph is unchanged.
+members = [".", "vendor/srt-win"]
+
+# Workspace-root release profile (srt-win ships one; members cannot carry
+# [profile.*] sections). Applies to standalone fork builds only — consumer
+# workspaces (e.g. picrab) keep their own profiles.
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
 [[bin]]
 name = "srt"
 path = "src/main.rs"
@@ -40,8 +56,20 @@ bytes = "1"
 pin-project-lite = "0.2"
 futures = "0.3"
 
+# Unconditional (not in the windows target table below): sha2 is pure Rust
+# and tiny; the windows bin_store uses it for the exact-hash exe filename,
+# and the helper tests run on every host.
+sha2 = "0.10"
+
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27", features = ["signal", "process", "fs"] }
+
+# Windows helper crate: linked so the `srt` multicall binary can dispatch
+# `--srt-win` to `srt_win::run_from_args` (dev fallback when no machine-store
+# exe is installed). The orchestration layer itself spawns the exe as a
+# subprocess and does NOT link it.
+[target.'cfg(windows)'.dependencies]
+srt-win = { path = "vendor/srt-win" }
 
 [dev-dependencies]
 tempfile = "3"

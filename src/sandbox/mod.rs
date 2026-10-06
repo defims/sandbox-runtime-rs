@@ -6,6 +6,11 @@ pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
+// Windows orchestration is NOT target-gated: the module is written so its
+// decision logic and pure helpers compile and unit-test on every host
+// (win32 specifics live behind subprocess adapters). See mod.rs.
+pub mod windows;
+
 use crate::config::SandboxRuntimeConfig;
 use crate::error::SandboxError;
 use crate::utils::Platform;

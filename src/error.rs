@@ -31,6 +31,33 @@ pub enum SandboxError {
 
     #[error("Seccomp error: {0}")]
     Seccomp(String),
+
+    // ── Windows backend ────────────────────────────────────────────────
+    #[error("srt-win returned malformed JSON for `{args}`: {detail}")]
+    SrtWinBadJson { args: String, detail: String },
+
+    /// One-time elevated install is missing, or the extracted srt-win no
+    /// longer matches this build (version drift after an update). The
+    /// message carries actionable install instructions.
+    #[error("{0}")]
+    InstallRequired(String),
+
+    #[error("working directory on a mapped drive is not supported for sandboxing: {0}")]
+    MappedDriveCwd(String),
+
+    #[error("sandbox command line too long: ~{len} chars (CreateProcessW limit is 32767)")]
+    CommandLineTooLong { len: usize },
+
+    #[error(
+        "sandbox env overlay too long: ~{len} chars (CreateProcessW limit is 32767); \
+         shorten PATH or drop sandbox.environment entries"
+    )]
+    EnvTooLarge { len: usize },
+
+    #[error(
+        "shell is not readable by the sandbox account: {path}. {hint}"
+    )]
+    ShellNotReadable { path: String, hint: String },
 }
 
 /// Configuration-specific errors.
