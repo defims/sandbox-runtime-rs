@@ -34,8 +34,22 @@ impl HttpProxy {
         filter: DomainFilter,
         mitm_socket_path: Option<String>,
     ) -> Result<Self, SandboxError> {
-        // Bind to localhost on any available port
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        Self::with_port_range(filter, mitm_socket_path, None).await
+    }
+
+    /// Create a new HTTP proxy bound inside `port_range` (Windows: the WFP
+    /// fence only permits loopback connects to the installed PERMIT range —
+    /// an ephemeral port would be unreachable from inside the fence).
+    /// Tries each port LOW..=HIGH in order; exhausts the range → error.
+    pub async fn with_port_range(
+        filter: DomainFilter,
+        mitm_socket_path: Option<String>,
+        port_range: Option<(u16, u16)>,
+    ) -> Result<Self, SandboxError> {
+        let listener = match port_range {
+            None => TcpListener::bind("127.0.0.1:0").await?,
+            Some((low, high)) => bind_in_range(low, high).await?,
+        };
         let port = listener.local_addr()?.port();
 
         tracing::debug!("HTTP proxy listening on port {}", port);
@@ -397,6 +411,27 @@ async fn forward_http_via_mitm(
         .status(StatusCode::NOT_IMPLEMENTED)
         .body(full_body("MITM HTTP forwarding not implemented"))
         .unwrap())
+}
+
+/// Bind inside the loopback PERMIT range: sequential LOW..=HIGH, first
+/// success wins. Public so the SOCKS proxy shares it.
+pub async fn bind_in_range(
+    low: u16,
+    high: u16,
+) -> Result<TcpListener, SandboxError> {
+    let mut last_err = None;
+    for port in low..=high {
+        match TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(l) => return Ok(l),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(SandboxError::Proxy(format!(
+        "proxy port range {low}-{high} exhausted: {} — another sandbox session \
+         may hold the range; raise windows.proxyPortRange in the config AND reinstall \
+         with the matching --proxy-port-range",
+        last_err.map(|e| e.to_string()).unwrap_or_default()
+    )))
 }
 
 fn empty_body() -> BoxBody<Bytes, hyper::Error> {

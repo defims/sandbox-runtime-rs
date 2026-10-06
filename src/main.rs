@@ -36,6 +36,48 @@ async fn main() -> ExitCode {
     // Initialize logging
     init_debug_logging(cli.debug);
 
+    // Windows install/uninstall: provisioning orchestration, no manager.
+    // On non-Windows targets these flags are a hard error (fail closed —
+    // silently ignoring an install request would mislead automation).
+    if cli.windows_install || cli.windows_uninstall {
+        #[cfg(not(windows))]
+        {
+            let _ = (&cli.keep_user, &cli.force);
+            eprintln!("--windows-install/--windows-uninstall are Windows-only");
+            return ExitCode::from(1);
+        }
+        #[cfg(windows)]
+        {
+            let outcome = if cli.windows_install {
+                let range = match cli.proxy_port_range.as_deref() {
+                    Some(s) => match sandbox_runtime::cli::parse_port_range(s) {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            eprintln!("{e}");
+                            return ExitCode::from(1);
+                        }
+                    },
+                    None => None,
+                };
+                sandbox_runtime::sandbox::windows::install::run_install(
+                    &sandbox_runtime::sandbox::windows::install::InstallOptions {
+                        sublayer_guid: cli.sublayer_guid.clone(),
+                        proxy_port_range: range,
+                        sandbox_user: cli.sandbox_user.clone(),
+                        force: cli.force,
+                    },
+                )
+            } else {
+                sandbox_runtime::sandbox::windows::install::run_uninstall(
+                    cli.sublayer_guid.as_deref(),
+                    cli.keep_user,
+                )
+            };
+            println!("{}", outcome.message);
+            return ExitCode::from(outcome.code as u8);
+        }
+    }
+
     // Load configuration
     let config = match cli.get_settings_path() {
         Some(path) if path.exists() => match load_config(&path) {
@@ -144,7 +186,7 @@ async fn main() -> ExitCode {
     };
 
     // Wrap and execute the command
-    let wrapped_command = match manager.wrap_with_sandbox(&command, None, None).await {
+    let wrapped = match manager.wrap_with_sandbox(&command, None, None, &[]).await {
         Ok(cmd) => cmd,
         Err(e) => {
             eprintln!("Failed to wrap command: {}", e);
@@ -153,36 +195,62 @@ async fn main() -> ExitCode {
         }
     };
 
-    tracing::debug!("Wrapped command: {}", wrapped_command);
+    tracing::debug!("Wrapped command: {:?}", wrapped);
 
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.arg("-c").arg(&wrapped_command);
+    // Execute, platform-shaped: Windows spawns srt-win natively (the wrap
+    // carries its own env overlay); unix runs the shell command line with
+    // proxy env injected by the caller.
+    #[cfg(windows)]
+    let status = match &wrapped {
+        sandbox_runtime::manager::WrappedCommand::WindowsSpawn(spec) => {
+            let mut c = tokio::process::Command::new(&spec.program);
+            c.args(&spec.args);
+            c.envs(spec.env.iter().cloned());
+            for k in &spec.env_removals {
+                c.env_remove(k);
+            }
+            c.status().await
+        }
+        sandbox_runtime::manager::WrappedCommand::Shell(s) => {
+            let mut c = tokio::process::Command::new("sh");
+            c.arg("-c").arg(s);
+            c.status().await
+        }
+    };
 
-    // Inject proxy env vars when the network is restricted, so proxy-aware
-    // tools (curl, git, pip...) reach the allowlist filter. With no domain
-    // lists configured the profile allows direct egress and no proxy is used.
-    // (macOS only here: the srt demo binary wraps through the Seatbelt path;
-    // platform-parity wrapping is the manager's job, not this binary's.)
-    #[cfg(target_os = "macos")]
-    {
-        let network_restricted = manager
-            .get_config()
-            .map(|c| {
-                !c.network.allowed_domains.is_empty() || !c.network.denied_domains.is_empty()
-            })
-            .unwrap_or(false);
-        if network_restricted {
-            for (k, v) in sandbox_runtime::sandbox::macos::generate_proxy_env(
-                manager.get_proxy_port().unwrap_or(0),
-                manager.get_socks_proxy_port().unwrap_or(0),
-            ) {
-                cmd.env(k, v);
+    #[cfg(not(windows))]
+    let status = {
+        let sh = wrapped
+            .as_shell()
+            .expect("unix wraps are shell-shaped");
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c").arg(sh);
+
+        // Inject proxy env vars when the network is restricted, so proxy-aware
+        // tools (curl, git, pip...) reach the allowlist filter. With no domain
+        // lists configured the profile allows direct egress and no proxy is used.
+        // (macOS only here: the srt demo binary wraps through the Seatbelt path;
+        // platform-parity wrapping is the manager's job, not this binary's.)
+        #[cfg(target_os = "macos")]
+        {
+            let network_restricted = manager
+                .get_config()
+                .map(|c| {
+                    !c.network.allowed_domains.is_empty() || !c.network.denied_domains.is_empty()
+                })
+                .unwrap_or(false);
+            if network_restricted {
+                for (k, v) in sandbox_runtime::sandbox::macos::generate_proxy_env(
+                    manager.get_proxy_port().unwrap_or(0),
+                    manager.get_socks_proxy_port().unwrap_or(0),
+                ) {
+                    cmd.env(k, v);
+                }
             }
         }
-    }
 
-    // Execute the wrapped command
-    let status = cmd.status().await;
+        cmd.status().await
+    };
 
     // Cleanup: signal control fd reader to stop and reset sandbox manager
     #[cfg(unix)]

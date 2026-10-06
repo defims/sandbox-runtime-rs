@@ -93,7 +93,17 @@ pub fn expand_fs_paths(
         if contains_glob_chars(&norm.to_string_lossy()) {
             out.extend(expand_glob(&norm));
         } else {
-            out.push(norm);
+            // Deny-mode dir-leaf signal: a trailing separator in the raw
+            // input marks "directory only" (upstream #536). The separator
+            // is re-applied so srt-win's canonicalizer treats it as a dir.
+            let keep_sep = matches!(mode, Mode::Deny)
+                && (raw.ends_with('/') || raw.ends_with('\\'))
+                && !norm.to_string_lossy().ends_with('/');
+            if keep_sep {
+                out.push(PathBuf::from(format!("{}/", norm.to_string_lossy())));
+            } else {
+                out.push(norm);
+            }
         }
     }
     Ok(out)

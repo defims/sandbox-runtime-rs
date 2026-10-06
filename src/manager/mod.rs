@@ -17,6 +17,28 @@ use self::state::ManagerState;
 
 pub use filesystem::{FsReadRestrictionConfig, FsWriteRestrictionConfig};
 
+/// Result of wrapping a command — platform-shaped (fork decision: Windows
+/// returns a NATIVE spawn spec instead of a shell string, so picrab spawns
+/// srt-win directly and skips the outer bash entirely; that avoids double
+/// quoting and MSYS path rewriting).
+#[derive(Debug, Clone)]
+pub enum WrappedCommand {
+    /// macOS/Linux: command line for the caller's `sh -c` (unix shape).
+    Shell(String),
+    /// Windows: spawn srt-win directly (program + args + env overlay).
+    WindowsSpawn(crate::sandbox::windows::wrap::WrapOutput),
+}
+
+impl WrappedCommand {
+    /// The shell command line, when this is the unix shape.
+    pub fn as_shell(&self) -> Option<&str> {
+        match self {
+            WrappedCommand::Shell(s) => Some(s),
+            WrappedCommand::WindowsSpawn(_) => None,
+        }
+    }
+}
+
 /// The sandbox manager - main entry point for sandbox operations.
 pub struct SandboxManager {
     state: Arc<RwLock<ManagerState>>,
@@ -71,9 +93,35 @@ impl SandboxManager {
         let platform = current_platform()
             .ok_or_else(|| SandboxError::UnsupportedPlatform("Unsupported platform".to_string()))?;
 
+        // Initialize platform-specific infrastructure.
+        //
+        // Windows: session ACL grants + mandatory deny stamps happen BEFORE
+        // the proxies start (fail fast on install/drift errors); the
+        // behavioral WFP fence check runs AFTER them. Proxy ports MUST sit
+        // inside the WFP PERMIT range on Windows — an ephemeral port is
+        // unreachable from inside the fence.
+        let is_windows = platform == Platform::Windows;
+        let windows_session = if is_windows {
+            Some(crate::sandbox::windows::initialize_session(&config)?)
+        } else {
+            None
+        };
+
+        let port_range = if is_windows {
+            Some(
+                config
+                    .windows
+                    .as_ref()
+                    .and_then(|w| w.proxy_port_range)
+                    .unwrap_or(crate::config::schema::DEFAULT_WINDOWS_PROXY_PORT_RANGE),
+            )
+        } else {
+            None
+        };
+
         // Initialize proxies
         let (http_proxy, socks_proxy) =
-            network::initialize_proxies(&config.network).await?;
+            network::initialize_proxies(&config.network, port_range).await?;
 
         let http_port = http_proxy.port();
         let socks_port = socks_proxy.port();
@@ -84,13 +132,13 @@ impl SandboxManager {
         state.socks_proxy = Some(socks_proxy);
         state.http_proxy_port = Some(http_port);
         state.socks_proxy_port = Some(socks_port);
+        state.windows_session = windows_session;
 
-        // Initialize platform-specific infrastructure
+        // Linux: Unix socket bridges for the proxies.
         #[cfg(target_os = "linux")]
         {
             use crate::sandbox::linux::{generate_socket_path, SocatBridge};
 
-            // Create Unix socket bridges for proxies
             let http_socket_path = generate_socket_path("srt-http");
             let socks_socket_path = generate_socket_path("srt-socks");
 
@@ -109,6 +157,24 @@ impl SandboxManager {
         state.config = Some(config);
         state.initialized = true;
         state.network_ready = true;
+
+        // Windows: behavioral fence verification with the proxies up —
+        // a sandbox-account egress probe must come back BLOCKED.
+        if is_windows {
+            if let Some(sess) = state.windows_session.as_ref() {
+                let sublayer = state
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.windows.as_ref())
+                    .and_then(|w| w.sublayer_guid.clone());
+                crate::sandbox::windows::status::verify_wfp_egress(
+                    &sess.spawn,
+                    sublayer.as_deref(),
+                    // Literal IP: no DNS dependency in the probe itself.
+                    "1.1.1.1:443",
+                )?;
+            }
+        }
 
         tracing::info!(
             "Sandbox manager initialized for {} (HTTP proxy: {}, SOCKS proxy: {})",
@@ -225,14 +291,20 @@ impl SandboxManager {
     }
 
     /// Wrap a command with sandbox restrictions.
+    ///
+    /// `relay_env`: host environment to relay INTO the sandboxed child
+    /// (Windows only — the two-hop runner starts from a FRESH profile env,
+    /// so callers pass their filtered env here or API tokens etc. vanish).
+    /// Ignored on macOS/Linux (children inherit the caller's env there).
     pub async fn wrap_with_sandbox(
         &self,
         command: &str,
         shell: Option<&str>,
         custom_config: Option<SandboxRuntimeConfig>,
-    ) -> Result<String, SandboxError> {
+        relay_env: &[(String, String)],
+    ) -> Result<WrappedCommand, SandboxError> {
         // Extract needed values from state while holding the lock
-        let (config, http_port, socks_port) = {
+        let (config, custom_for_windows, http_port, socks_port) = {
             let state = self.state.read();
 
             if !state.initialized {
@@ -241,15 +313,85 @@ impl SandboxManager {
                 ));
             }
 
-            let config = custom_config
+            let merged = custom_config
+                .clone()
                 .or_else(|| state.config.clone())
                 .ok_or_else(|| SandboxError::ExecutionFailed("No configuration available".to_string()))?;
 
-            (config, state.http_proxy_port, state.socks_proxy_port)
+            (merged, custom_config, state.http_proxy_port, state.socks_proxy_port)
         };
 
-        let _platform = current_platform()
+        let platform = current_platform()
             .ok_or_else(|| SandboxError::UnsupportedPlatform("Unsupported platform".to_string()))?;
+
+        // Windows: spawn-spec shape. Custom configs may only TIGHTEN
+        // (deny lists) — allow grants are session-level (initialize-time
+        // ACLs), matching upstream's Windows contract.
+        if platform == Platform::Windows {
+            let session = {
+                let state = self.state.read();
+                state
+                    .windows_session
+                    .clone()
+                    .ok_or_else(|| SandboxError::ExecutionFailed(
+                        "Windows session not initialized".to_string(),
+                    ))?
+            };
+
+            let shell_probe = crate::sandbox::windows::shell::parse_bin_shell(shell)?;
+            crate::sandbox::windows::shell::probe_shell(&shell_probe.exe)?;
+
+            let (deny_read, deny_write) = match &custom_for_windows {
+                None => (Vec::new(), Vec::new()),
+                Some(c) => {
+                    if !c.filesystem.allow_write.is_empty() || !c.filesystem.allow_read.is_empty()
+                    {
+                        return Err(SandboxError::ExecutionFailed(
+                            "per-exec allow overrides are not supported on Windows; \
+                             grants are session-level — put them in the manager config"
+                                .to_string(),
+                        ));
+                    }
+                    let cwd = std::env::current_dir()?;
+                    (
+                        crate::sandbox::windows::paths::expand_fs_paths(
+                            &c.filesystem.deny_read,
+                            &cwd,
+                            crate::sandbox::windows::paths::Mode::Deny,
+                        )?,
+                        crate::sandbox::windows::paths::expand_fs_paths(
+                            &c.filesystem.deny_write,
+                            &cwd,
+                            crate::sandbox::windows::paths::Mode::Deny,
+                        )?,
+                    )
+                }
+            };
+            let to_str = |v: Vec<std::path::PathBuf>| {
+                v.into_iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>()
+            };
+            let deny_read_s = to_str(deny_read);
+            let deny_write_s = to_str(deny_write);
+            let session_cfg = self.get_config();
+            let session_cfg = session_cfg.unwrap_or(config.clone());
+            let allow_write_s: Vec<String> =
+                session_cfg.filesystem.allow_write.iter().cloned().collect();
+            let cwd = std::env::current_dir()?;
+            let params = crate::sandbox::windows::wrap::WrapParams {
+                spawn: &session.spawn,
+                command,
+                shell: &shell_probe,
+                relay_env,
+                http_proxy_port: http_port,
+                socks_proxy_port: socks_port,
+                deny_read: &deny_read_s,
+                deny_write: &deny_write_s,
+                cwd: &cwd,
+                allow_write: &allow_write_s,
+            };
+            let out = crate::sandbox::windows::wrap::wrap(&params)?;
+            return Ok(WrappedCommand::WindowsSpawn(out));
+        }
 
         // Call platform-specific wrapper
         #[cfg(target_os = "macos")]
@@ -262,7 +404,7 @@ impl SandboxManager {
                 shell,
                 true, // enable log monitor
             )?;
-            Ok(wrapped)
+            Ok(WrappedCommand::Shell(wrapped))
         }
 
         #[cfg(target_os = "linux")]
@@ -288,7 +430,7 @@ impl SandboxManager {
                 tracing::warn!("{}", warning);
             }
 
-            Ok(wrapped)
+            Ok(WrappedCommand::Shell(wrapped))
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -323,6 +465,14 @@ impl SandboxManager {
         #[cfg(target_os = "macos")]
         {
             crate::sandbox::macos::cleanup_temp_profiles();
+        }
+
+        // Windows: release the session's refcounted ACL claims BEFORE the
+        // proxies stop (order irrelevant to correctness, but revoking while
+        // the fence is still up matches "session ending" semantics).
+        let windows_session = self.state.read().windows_session.clone();
+        if let Some(sess) = &windows_session {
+            crate::sandbox::windows::release_session(sess);
         }
 
         let mut state = self.state.write();

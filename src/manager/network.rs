@@ -5,8 +5,13 @@ use crate::error::SandboxError;
 use crate::proxy::{DomainFilter, HttpProxy, Socks5Proxy};
 
 /// Initialize network proxies.
+///
+/// `port_range`: Windows only — the proxies MUST bind inside the WFP
+/// fence's loopback PERMIT range or fenced clients can't reach them
+/// (None ⇒ ephemeral, correct for macOS/Linux).
 pub async fn initialize_proxies(
     config: &NetworkConfig,
+    port_range: Option<(u16, u16)>,
 ) -> Result<(HttpProxy, Socks5Proxy), SandboxError> {
     // Create domain filter from config
     let filter = DomainFilter::from_config(config);
@@ -15,11 +20,11 @@ pub async fn initialize_proxies(
     let mitm_socket_path = config.mitm_proxy.as_ref().map(|m| m.socket_path.clone());
 
     // Create HTTP proxy
-    let mut http_proxy = HttpProxy::new(filter.clone(), mitm_socket_path).await?;
+    let mut http_proxy = HttpProxy::with_port_range(filter.clone(), mitm_socket_path, port_range).await?;
     http_proxy.start()?;
 
     // Create SOCKS5 proxy
-    let mut socks_proxy = Socks5Proxy::new(filter).await?;
+    let mut socks_proxy = Socks5Proxy::with_port_range(filter, port_range).await?;
     socks_proxy.start()?;
 
     tracing::debug!(

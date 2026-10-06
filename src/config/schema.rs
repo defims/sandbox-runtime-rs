@@ -73,7 +73,47 @@ pub struct FilesystemConfig {
     /// Allow writes to .git/config.
     #[serde(default)]
     pub allow_git_config: Option<bool>,
+
+    /// Windows only: paths explicitly granted read+execute for the sandbox
+    /// account. The cross-account model has no implicit read (unlike
+    /// macOS/Linux same-user sandboxing), so user-profile resources
+    /// (`~/.gitconfig`, tool caches, …) need explicit entries here.
+    /// Ignored on other platforms.
+    #[serde(default)]
+    pub allow_read: Vec<String>,
 }
+
+/// Windows backend configuration (ignored on other platforms).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowsConfig {
+    /// WFP sublayer GUID — must match the one the elevated install used,
+    /// otherwise the readiness probe reads the wrong filter set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sublayer_guid: Option<String>,
+
+    /// Loopback PERMIT range the WFP filters were installed with, as
+    /// `[LOW, HIGH]` (default 60080–60089). The in-process proxies bind
+    /// inside this range; a mismatch means fenced clients can't reach the
+    /// proxy at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_port_range: Option<(u16, u16)>,
+
+    /// Explicit path to a `srt-win.exe` helper. Overrides the machine-store
+    /// copy (which is the exact-hash extraction of this build's embedded
+    /// helper).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub srt_win_path: Option<std::path::PathBuf>,
+
+    /// Sandbox account name — must match the elevated install (`srt-win`
+    /// only manages an account it provisioned). Default `srt-sandbox`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_user: Option<String>,
+}
+
+/// Default loopback PERMIT range — must stay in sync with srt-win's
+/// install default (`LOW-HIGH` = 60080-60089).
+pub const DEFAULT_WINDOWS_PROXY_PORT_RANGE: (u16, u16) = (60080, 60089);
 
 /// Ripgrep configuration for dangerous file discovery on Linux.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +180,10 @@ pub struct SandboxRuntimeConfig {
     /// Custom seccomp configuration.
     #[serde(default)]
     pub seccomp: Option<SeccompConfig>,
+
+    /// Windows backend configuration (ignored on other platforms).
+    #[serde(default)]
+    pub windows: Option<WindowsConfig>,
 }
 
 /// Dangerous files that should never be writable.
@@ -186,6 +230,19 @@ impl SandboxRuntimeConfig {
         if let Some(ref mitm) = self.network.mitm_proxy {
             for domain in &mitm.domains {
                 validate_domain_pattern(domain)?;
+            }
+        }
+
+        // Windows: the proxy bind range must be sane — a mismatch with the
+        // WFP install means fenced clients can never reach the proxy.
+        if let Some(windows) = &self.windows {
+            if let Some((low, high)) = windows.proxy_port_range {
+                if low == 0 || low >= high {
+                    return Err(ConfigError::ValidationError(format!(
+                        "windows.proxyPortRange must be LOW<HIGH within 1-65535, got {low}-{high}"
+                    ))
+                    .into());
+                }
             }
         }
 

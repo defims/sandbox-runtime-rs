@@ -39,8 +39,12 @@ pub struct ManagerState {
     /// Whether the manager has been initialized.
     pub initialized: bool,
 
-    /// Whether network is ready.
+    /// Whether the network is ready.
     pub network_ready: bool,
+
+    /// Windows session state (resolved helper + sandbox-user SID),
+    /// populated by `initialize()` on Windows and cleared by `reset()`.
+    pub windows_session: Option<crate::sandbox::windows::WindowsSession>,
 
     /// Violation store.
     pub violation_store: Arc<SandboxViolationStore>,
@@ -62,6 +66,7 @@ impl Default for ManagerState {
             bridges: Vec::new(),
             initialized: false,
             network_ready: false,
+            windows_session: None,
             violation_store: Arc::new(SandboxViolationStore::new()),
         }
     }
@@ -102,5 +107,6 @@ impl ManagerState {
         self.config = None;
         self.initialized = false;
         self.network_ready = false;
+        self.windows_session = None;
     }
 }

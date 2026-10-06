@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::bin_store::SrtWinSpawn;
-use super::invocation;
 use super::paths::check_cwd_sandboxable;
 use super::shell::ShellProbe;
 use crate::error::SandboxError;
@@ -282,11 +281,5 @@ mod tests {
         })
         .unwrap_err();
         assert!(matches!(err, SandboxError::MappedDriveCwd(_)));
-    }
-
-    #[test]
-    fn typed_exit16_is_mapped_drive_error() {
-        // Sanity on the constant used by the runner-side classification.
-        assert_eq!(invocation::EXIT_MAPPED_DRIVE_CWD, 16);
     }
 }

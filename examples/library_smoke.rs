@@ -8,9 +8,10 @@
 use sandbox_runtime::config::{FilesystemConfig, NetworkConfig, SandboxRuntimeConfig};
 use sandbox_runtime::manager::SandboxManager;
 
-fn run_wrapped(wrapped: &str, extra_env: &[(String, String)]) -> (bool, String) {
+fn run_wrapped(wrapped: &sandbox_runtime::manager::WrappedCommand, extra_env: &[(String, String)]) -> (bool, String) {
+    let sh = wrapped.as_shell().expect("unix wraps are shell-shaped").to_string();
     let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c").arg(wrapped);
+    cmd.arg("-c").arg(sh);
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
@@ -52,6 +53,7 @@ async fn main() {
                 "cat ~/.ssh/known_hosts 2>&1 | head -1; echo rc=$?",
                 None,
                 None,
+                &[],
             )
             .await
             .expect("wrap deny-read probe"),
@@ -70,6 +72,7 @@ async fn main() {
                 "echo hi > /tmp/srt-lib-smoke.txt && cat /tmp/srt-lib-smoke.txt && rm /tmp/srt-lib-smoke.txt && echo RM_OK || echo RM_BLOCKED",
                 None,
                 None,
+                &[],
             )
             .await
             .expect("wrap write probe"),
@@ -105,7 +108,7 @@ async fn main() {
 
     let env = sandbox_runtime::sandbox::macos::generate_proxy_env(http_port, socks_port);
     let wrapped_allowed = manager2
-        .wrap_with_sandbox("curl -sS -m 15 https://api.github.com/zen", None, None)
+        .wrap_with_sandbox("curl -sS -m 15 https://api.github.com/zen", None, None, &[])
         .await
         .expect("wrap allowed-domain probe");
     let (ok, out) = run_wrapped(&wrapped_allowed, &env);
@@ -121,6 +124,7 @@ async fn main() {
             "curl -sS -m 15 https://example.com 2>&1 | head -2; echo curl_rc=$?",
             None,
             None,
+            &[],
         )
         .await
         .expect("wrap blocked-domain probe");

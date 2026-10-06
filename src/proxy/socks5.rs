@@ -33,7 +33,19 @@ pub struct Socks5Proxy {
 impl Socks5Proxy {
     /// Create a new SOCKS5 proxy server.
     pub async fn new(filter: DomainFilter) -> Result<Self, SandboxError> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        Self::with_port_range(filter, None).await
+    }
+
+    /// Create a new SOCKS5 proxy bound inside `port_range` (Windows: must
+    /// match the WFP PERMIT range — see [`HttpProxy::with_port_range`]).
+    pub async fn with_port_range(
+        filter: DomainFilter,
+        port_range: Option<(u16, u16)>,
+    ) -> Result<Self, SandboxError> {
+        let listener = match port_range {
+            None => TcpListener::bind("127.0.0.1:0").await?,
+            Some((low, high)) => crate::proxy::http::bind_in_range(low, high).await?,
+        };
         let port = listener.local_addr()?.port();
 
         tracing::debug!("SOCKS5 proxy listening on port {}", port);
