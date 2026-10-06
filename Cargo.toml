@@ -68,8 +68,14 @@ nix = { version = "0.27", features = ["signal", "process", "fs"] }
 # `--srt-win` to `srt_win::run_from_args` (dev fallback when no machine-store
 # exe is installed). The orchestration layer itself spawns the exe as a
 # subprocess and does NOT link it.
+# windows-rs: only the thin FFI adapters (drive type query). Keep the
+# feature list minimal — the vendored crate carries the heavy win32 work.
 [target.'cfg(windows)'.dependencies]
 srt-win = { path = "vendor/srt-win" }
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+] }
 
 [dev-dependencies]
 tempfile = "3"

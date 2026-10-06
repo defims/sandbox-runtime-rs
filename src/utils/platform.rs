@@ -5,11 +5,14 @@
 pub enum Platform {
     MacOS,
     Linux,
+    Windows,
 }
 
 impl Platform {
     /// Detect the current platform.
     /// Note: All Linux including WSL returns Linux. Use `get_wsl_version()` to detect WSL1 (unsupported).
+    /// Native Windows returns Windows; a WSL-resident shell is rejected later
+    /// at the Windows backend's shell probe, not here.
     pub fn current() -> Option<Self> {
         #[cfg(target_os = "macos")]
         {
@@ -21,7 +24,11 @@ impl Platform {
             // WSL1 is also returned as Linux but will fail is_supported() check
             Some(Platform::Linux)
         }
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(target_os = "windows")]
+        {
+            Some(Platform::Windows)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         {
             None
         }
@@ -36,6 +43,11 @@ impl Platform {
                 get_wsl_version() != Some("1".to_string())
             }
             Some(Platform::MacOS) => true,
+            // Windows support additionally requires the one-time elevated
+            // install (srt-sandbox account + WFP fence + extracted helper);
+            // that readiness is checked by the Windows dependency probe,
+            // not here.
+            Some(Platform::Windows) => true,
             None => false,
         }
     }
@@ -45,6 +57,7 @@ impl Platform {
         match self {
             Platform::MacOS => "macOS",
             Platform::Linux => "Linux",
+            Platform::Windows => "Windows",
         }
     }
 }

@@ -99,6 +99,18 @@ pub fn check_dependencies_detailed(
             // sandbox-exec is built into macOS
             SandboxDependencyCheck::default()
         }
+        Platform::Windows => {
+            // One `srt-win status` spawn; errors carry install instructions.
+            // When the helper itself cannot be resolved, surface that as the
+            // dependency error instead.
+            match crate::sandbox::windows::resolve_srt_win_spawn(None) {
+                Ok(spawn) => crate::sandbox::windows::status::check_dependencies(&spawn, None),
+                Err(e) => SandboxDependencyCheck {
+                    errors: vec![e.to_string()],
+                    warnings: vec![],
+                },
+            }
+        }
         Platform::Linux => {
             #[cfg(target_os = "linux")]
             {
@@ -157,6 +169,13 @@ pub async fn wrap_command(
                     "macOS sandbox code not compiled on this platform".to_string(),
                 ))
             }
+        }
+        Platform::Windows => {
+            // Wired by SandboxManager::wrap_with_sandbox (which owns the
+            // resolved spawn descriptor and the per-exec config merge).
+            Err(SandboxError::UnsupportedPlatform(
+                "Windows wrap must go through SandboxManager::wrap_with_sandbox".to_string(),
+            ))
         }
         Platform::Linux => {
             #[cfg(target_os = "linux")]

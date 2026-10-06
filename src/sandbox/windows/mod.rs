@@ -14,3 +14,12 @@
 
 pub mod bin_store;
 pub mod embed;
+pub mod invocation;
+pub mod paths;
+pub mod session;
+pub mod shell;
+pub mod status;
+pub mod win32;
+pub mod wrap;
+
+pub use bin_store::{resolve_srt_win_spawn, SrtWinSpawn};
