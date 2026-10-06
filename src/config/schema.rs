@@ -268,7 +268,7 @@ fn validate_domain_pattern(pattern: &str) -> Result<(), SandboxError> {
 
     // Check for too broad patterns like *.com
     if pattern.starts_with("*.") {
-        let suffix = pattern.strip_prefix("*").unwrap_or(pattern);
+        let suffix = pattern.strip_prefix("*.").unwrap_or(pattern);
         // Check if suffix is a TLD or too short
         if !suffix.contains('.') && suffix.len() <= 4 {
             return Err(ConfigError::InvalidDomainPattern {
