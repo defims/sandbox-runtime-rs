@@ -9,8 +9,11 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use tokio::net::{TcpListener, TcpStream};
+#[cfg(unix)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UnixStream};
+#[cfg(unix)]
+use tokio::net::UnixStream;
 use tokio::sync::oneshot;
 
 use crate::error::SandboxError;
@@ -144,6 +147,7 @@ async fn handle_request(
 }
 
 /// Handle CONNECT requests (HTTPS tunneling).
+#[cfg_attr(not(unix), allow(unused_variables))]
 async fn handle_connect(
     req: Request<hyper::body::Incoming>,
     filter: Arc<DomainFilter>,
@@ -166,9 +170,20 @@ async fn handle_connect(
                 .unwrap());
         }
         FilterDecision::Mitm => {
-            // Route through MITM proxy via Unix socket
+            // Route through MITM proxy via Unix socket (unix only; the
+            // TLS-terminate helper speaks a Unix-socket protocol).
+            #[cfg(unix)]
             if let Some(socket_path) = mitm_socket_path {
                 return handle_connect_mitm(req, &socket_path, &host, port).await;
+            }
+            #[cfg(not(unix))]
+            {
+                return Ok(Response::builder()
+                    .status(StatusCode::NOT_IMPLEMENTED)
+                    .body(full_body(
+                        "TLS-terminate (MITM) proxy is not supported on this platform",
+                    ))
+                    .unwrap());
             }
         }
         FilterDecision::Allow => {}
@@ -192,6 +207,7 @@ async fn handle_connect(
 }
 
 /// Handle CONNECT through MITM proxy.
+#[cfg(unix)]
 async fn handle_connect_mitm(
     req: Request<hyper::body::Incoming>,
     socket_path: &str,
@@ -238,6 +254,7 @@ async fn tunnel(
 }
 
 /// Tunnel through MITM proxy via Unix socket.
+#[cfg(unix)]
 async fn tunnel_via_mitm(
     upgraded: hyper::upgrade::Upgraded,
     socket_path: &str,

@@ -1,10 +1,13 @@
 //! CLI entry point for the sandbox runtime (srt).
 
+#[cfg(unix)]
 use std::os::unix::io::FromRawFd;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+#[cfg(unix)]
 use tokio::io::{AsyncBufReadExt, BufReader};
+#[cfg(unix)]
 use tokio::sync::oneshot;
 
 use sandbox_runtime::cli::Cli;
@@ -53,8 +56,11 @@ async fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Set up control fd for dynamic config updates if specified
+    // Set up control fd for dynamic config updates if specified.
+    // Control fds are a Unix parent-child IPC pattern; other platforms
+    // ignore the flag with a warning.
     // Shutdown channel for graceful termination of the control fd reader task
+    #[cfg(unix)]
     let control_fd_shutdown: Option<oneshot::Sender<()>> = if let Some(fd) = cli.control_fd {
         // Validate fd is non-negative (negative fds are invalid and could cause UB)
         if fd < 0 {
@@ -116,6 +122,13 @@ async fn main() -> ExitCode {
         None
     };
 
+    #[cfg(not(unix))]
+    let control_fd_shutdown = {
+        if cli.control_fd.is_some() {
+            eprintln!("Warning: --control-fd is not supported on this platform; ignoring.");
+        }
+    };
+
     // Wrap and execute the command
     let wrapped_command = match manager.wrap_with_sandbox(&command, None, None).await {
         Ok(cmd) => cmd,
@@ -128,23 +141,29 @@ async fn main() -> ExitCode {
 
     tracing::debug!("Wrapped command: {}", wrapped_command);
 
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c").arg(&wrapped_command);
+
     // Inject proxy env vars when the network is restricted, so proxy-aware
     // tools (curl, git, pip...) reach the allowlist filter. With no domain
     // lists configured the profile allows direct egress and no proxy is used.
-    let network_restricted = manager
-        .get_config()
-        .map(|c| {
-            !c.network.allowed_domains.is_empty() || !c.network.denied_domains.is_empty()
-        })
-        .unwrap_or(false);
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.arg("-c").arg(&wrapped_command);
-    if network_restricted {
-        for (k, v) in sandbox_runtime::sandbox::macos::generate_proxy_env(
-            manager.get_proxy_port().unwrap_or(0),
-            manager.get_socks_proxy_port().unwrap_or(0),
-        ) {
-            cmd.env(k, v);
+    // (macOS only here: the srt demo binary wraps through the Seatbelt path;
+    // platform-parity wrapping is the manager's job, not this binary's.)
+    #[cfg(target_os = "macos")]
+    {
+        let network_restricted = manager
+            .get_config()
+            .map(|c| {
+                !c.network.allowed_domains.is_empty() || !c.network.denied_domains.is_empty()
+            })
+            .unwrap_or(false);
+        if network_restricted {
+            for (k, v) in sandbox_runtime::sandbox::macos::generate_proxy_env(
+                manager.get_proxy_port().unwrap_or(0),
+                manager.get_socks_proxy_port().unwrap_or(0),
+            ) {
+                cmd.env(k, v);
+            }
         }
     }
 
@@ -152,10 +171,13 @@ async fn main() -> ExitCode {
     let status = cmd.status().await;
 
     // Cleanup: signal control fd reader to stop and reset sandbox manager
+    #[cfg(unix)]
     if let Some(shutdown_tx) = control_fd_shutdown {
         // Send shutdown signal (ignore error if receiver already dropped)
         let _ = shutdown_tx.send(());
     }
+    #[cfg(not(unix))]
+    let _ = control_fd_shutdown;
     manager.reset().await;
 
     match status {
