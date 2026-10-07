@@ -3,6 +3,11 @@
 //! initialize(config) → wrap_with_sandbox(cmd) → spawn `sh -c <wrapped>`
 //! with proxy env injected → verify enforcement → annotate violations → reset.
 //!
+//! Unix-only (macOS Seatbelt / Linux bwrap): uses the macos proxy-env
+//! generator and `sh` directly. On Windows the wrap returns a
+//! WindowsSpawn spec and the proxy env rides inside it — see the
+//! windows-gate workflow's smoke job for the Windows flow.
+//!
 //! Run: cargo run --example library_smoke
 
 use sandbox_runtime::config::{FilesystemConfig, NetworkConfig, SandboxRuntimeConfig};
@@ -24,6 +29,7 @@ fn run_wrapped(wrapped: &sandbox_runtime::manager::WrappedCommand, extra_env: &[
     (out.status.success(), combined)
 }
 
+#[cfg(unix)]
 #[tokio::main]
 async fn main() {
     let mut failures = Vec::new();
@@ -154,4 +160,9 @@ async fn main() {
         }
         std::process::exit(1);
     }
+}
+
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("library_smoke is a unix-flow demo; windows smoke lives in CI");
 }

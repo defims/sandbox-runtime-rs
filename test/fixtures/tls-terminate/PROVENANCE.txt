@@ -1,0 +1,1 @@
+test fixture TLS-terminate CA, vendored from anthropics/sandbox-runtime @ 40804af (path: test/fixtures/tls-terminate/) — required by vendored srt-win cert_store.rs unit test (include_bytes!).
