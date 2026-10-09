@@ -122,8 +122,13 @@ jobs:
       - name: Fork readiness status (single spawn {user, wfp})
         shell: pwsh
         run: |
-          $json = ./target/release/srt.exe --srt-win status | ConvertFrom-Json
-          if (-not $json.user.exists) { throw "sandbox user not provisioned" }
+          # srt-win `status` = {user: <user-status>, wfp: …}; the user-status
+          # object itself nests the account under `.user` (user.user.exists).
+          $raw = ./target/release/srt.exe --srt-win status
+          $raw
+          $json = $raw | ConvertFrom-Json
+          if (-not $json.user.user.exists) { throw "sandbox user not provisioned" }
+          if (-not $json.user.cred_present) { throw "sandbox credential not readable" }
           if ($json.wfp.state -eq "absent") { throw "wfp filters absent" }
 
       # Helper subprocess tests: exec probes + kill propagation, driven
