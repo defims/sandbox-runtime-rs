@@ -113,6 +113,23 @@ jobs:
           cargo build --release -p srt-win
           cargo build --release --bin srt
 
+      # Vendored helper probes FIRST: smoke-exec's R0b expects the sandbox
+      # account to be UNPROVISIONED (exit 15), so it must run on a clean
+      # machine — before the fork install below. It provisions its own
+      # test-only sublayer and cleans up after itself.
+      - name: Vendored exec probes (deny-read / allow-write / fence)
+        shell: pwsh
+        run: ./vendor/srt-win/ci/smoke-exec.ps1 ./target/release/srt-win.exe
+
+      - name: Vendored kill-propagation probe (cancel leaves no orphans)
+        shell: pwsh
+        run: ./vendor/srt-win/ci/smoke-kill.ps1 ./target/release/srt-win.exe
+
+      - name: Vendored smoke cleanup (test sublayer)
+        if: always()
+        shell: pwsh
+        run: ./vendor/srt-win/ci/cleanup.ps1 ./target/release/srt-win.exe
+
       # Fork install path: --windows-install -> srt-win (self-elevating; a
       # no-op on GH runners, which are admin) -> machine-store extraction.
       - name: Fork install
@@ -130,21 +147,6 @@ jobs:
           if (-not $json.user.user.exists) { throw "sandbox user not provisioned" }
           if (-not $json.user.cred_present) { throw "sandbox credential not readable" }
           if ($json.wfp.state -eq "absent") { throw "wfp filters absent" }
-
-      # Helper subprocess tests: exec probes + kill propagation, driven
-      # against the standalone helper (fixed test-only sublayer GUID).
-      - name: Vendored exec probes (deny-read / allow-write / fence)
-        shell: pwsh
-        run: ./vendor/srt-win/ci/smoke-exec.ps1 ./target/release/srt-win.exe
-
-      - name: Vendored kill-propagation probe (cancel leaves no orphans)
-        shell: pwsh
-        run: ./vendor/srt-win/ci/smoke-kill.ps1 ./target/release/srt-win.exe
-
-      - name: Vendored smoke cleanup (test sublayer)
-        if: always()
-        shell: pwsh
-        run: ./vendor/srt-win/ci/cleanup.ps1 ./target/release/srt-win.exe
 
       # Fork uninstall path: filters + account removed, bin store emptied.
       - name: Fork uninstall cleans up
