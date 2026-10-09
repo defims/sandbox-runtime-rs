@@ -55,14 +55,44 @@ jobs:
       - name: Tests (host, incl. cross-platform windows-module logic)
         run: cargo test --workspace
 
-      - name: windows-gnu cross-check
-        # srt-win is excluded: its libsqlite3-sys build script needs a
-        # windows-gnu C toolchain (mingw-w64) that runners don't carry —
-        # the msvc-gate job compiles it natively. This job gates the fork's
-        # own crate + the windows orchestration logic.
+      - name: windows-gnu cross-check (stubbed C toolchain)
+        # srt-win is a cfg(windows) dependency of the crate itself, so the
+        # gnu target pulls rusqlite's C build — runners lack mingw-w64.
+        # Upstream's own answer: a stub CC/AR satisfies the libsqlite3-sys
+        # build script well enough for a CHECK (no codegen needed).
         run: |
           rustup target add x86_64-pc-windows-gnu
-          cargo check --workspace --exclude srt-win --target x86_64-pc-windows-gnu
+          mkdir -p .ci-stub
+          cat > .ci-stub/cc <<'EOF'
+          #!/bin/sh
+          # Emit empty outputs for whatever the cc-rs build script asks for.
+          out=""
+          prev=""
+          for a in "$@"; do
+            [ "$prev" = "-o" ] && out="$a"
+            prev="$a"
+          done
+          if [ -n "$out" ]; then
+            case "$out" in
+              *.a|*.lib) printf '!<arch>\n' > "$out" ;;
+              *) : > "$out" ;;
+            esac
+          fi
+          exit 0
+          EOF
+          cat > .ci-stub/ar <<'EOF'
+          #!/bin/sh
+          for a in "$@"; do
+            case "$a" in
+              *.a|*.lib) printf '!<arch>\n' > "$a" ;;
+            esac
+          done
+          exit 0
+          EOF
+          chmod +x .ci-stub/cc .ci-stub/ar
+          CC_x86_64_pc_windows_gnu="$PWD/.ci-stub/cc" \
+          AR_x86_64_pc_windows_gnu="$PWD/.ci-stub/ar" \
+          cargo check --workspace --target x86_64-pc-windows-gnu
 
   smoke:
     name: sandbox smoke (real Windows)

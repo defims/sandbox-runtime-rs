@@ -156,6 +156,14 @@ fn check_not_wsl(exe: &Path) -> Result<(), SandboxError> {
 /// This is a heuristic by design (see win32.rs scope note); `srt-win`'s
 /// typed exec errors remain the enforcement truth.
 pub fn probe_shell(exe: &Path) -> Result<(), SandboxError> {
+    let profile = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    probe_shell_in(exe, profile.as_deref())
+}
+
+/// Testable core of [`probe_shell`]: `profile_root` replaces the
+/// `%USERPROFILE%` env lookup so the per-user branch can be exercised
+/// against a synthetic tree on any host.
+fn probe_shell_in(exe: &Path, profile_root: Option<&Path>) -> Result<(), SandboxError> {
     check_not_wsl(exe)?;
     if !exe.is_file() {
         return Err(SandboxError::ShellNotReadable {
@@ -177,8 +185,8 @@ pub fn probe_shell(exe: &Path) -> Result<(), SandboxError> {
             }
         }
     }
-    if let Some(profile) = std::env::var_os("USERPROFILE") {
-        let profile_text = PathBuf::from(&profile).to_string_lossy().replace('/', "\\").to_lowercase();
+    if let Some(profile) = profile_root {
+        let profile_text = profile.to_string_lossy().replace('/', "\\").to_lowercase();
         if lowered.starts_with(&profile_text) {
             return Err(SandboxError::ShellNotReadable {
                 path: exe.display().to_string(),
@@ -235,18 +243,32 @@ mod tests {
 
     #[test]
     fn user_profile_shell_rejected_with_machine_hint() {
-        if std::env::var_os("USERPROFILE").is_none() {
-            return;
-        }
-        let profile = PathBuf::from(std::env::var_os("USERPROFILE").unwrap());
-        let exe = profile.join("AppData").join("Local").join("Programs").join("Git").join("bin").join("bash.exe");
-        let err = probe_shell(&exe);
+        // Synthetic profile tree: works on every host (the runner's real
+        // USERPROFILE has no such file, and the probe checks existence
+        // before the profile branch).
+        let tmp = std::env::temp_dir().join(format!("srt-shell-{}", std::process::id()));
+        let exe = tmp
+            .join("AppData")
+            .join("Local")
+            .join("Programs")
+            .join("Git")
+            .join("bin")
+            .join("bash.exe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, b"stub").unwrap();
+
+        let err = probe_shell_in(&exe, Some(&tmp));
         assert!(matches!(err, Err(SandboxError::ShellNotReadable { ref hint, .. }) if hint.contains("machine-wide")));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn missing_file_rejected() {
-        let err = probe_shell(Path::new(if cfg!(windows) { "C:\\no\\such\\bash.exe" } else { "/no/such/bash.exe" }));
+        let err = probe_shell_in(
+            Path::new(if cfg!(windows) { "C:\\no\\such\\bash.exe" } else { "/no/such/bash.exe" }),
+            None,
+        );
         assert!(matches!(err, Err(SandboxError::ShellNotReadable { ref hint, .. }) if hint.contains("not found")));
     }
 }
