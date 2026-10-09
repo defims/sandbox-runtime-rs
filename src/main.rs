@@ -181,11 +181,9 @@ async fn main() -> ExitCode {
     };
 
     #[cfg(not(unix))]
-    let control_fd_shutdown = {
-        if cli.control_fd.is_some() {
-            eprintln!("Warning: --control-fd is not supported on this platform; ignoring.");
-        }
-    };
+    if cli.control_fd.is_some() {
+        eprintln!("Warning: --control-fd is not supported on this platform; ignoring.");
+    }
 
     // Wrap and execute the command
     let wrapped = match manager.wrap_with_sandbox(&command, None, None, &[]).await {
@@ -260,8 +258,6 @@ async fn main() -> ExitCode {
         // Send shutdown signal (ignore error if receiver already dropped)
         let _ = shutdown_tx.send(());
     }
-    #[cfg(not(unix))]
-    let _ = control_fd_shutdown;
     manager.reset().await;
 
     match status {
