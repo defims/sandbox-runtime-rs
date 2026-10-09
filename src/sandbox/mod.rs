@@ -134,6 +134,9 @@ pub fn check_dependencies(platform: Platform) -> Result<(), SandboxError> {
 }
 
 /// Wrap a command with platform-specific sandboxing.
+/// (On Windows the wrap lives in `SandboxManager::wrap_with_sandbox` —
+/// this fn's windows arm is a routing guard, so its params sit idle.)
+#[cfg_attr(windows, allow(unused_variables))]
 pub async fn wrap_command(
     command: &str,
     config: &SandboxRuntimeConfig,

@@ -169,6 +169,8 @@ mod tests {
         assert_eq!(platform, Some(Platform::MacOS));
         #[cfg(target_os = "linux")]
         assert_eq!(platform, Some(Platform::Linux));
+        #[cfg(target_os = "windows")]
+        assert_eq!(platform, Some(Platform::Windows));
     }
 
     #[test]

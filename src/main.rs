@@ -11,7 +11,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
 
 use sandbox_runtime::cli::Cli;
-use sandbox_runtime::config::{load_config, load_config_from_string, load_default_config};
+use sandbox_runtime::config::{load_config, load_default_config};
+#[cfg(unix)]
+use sandbox_runtime::config::load_config_from_string;
 use sandbox_runtime::manager::SandboxManager;
 use sandbox_runtime::utils::init_debug_logging;
 

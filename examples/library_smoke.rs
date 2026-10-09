@@ -10,9 +10,12 @@
 //!
 //! Run: cargo run --example library_smoke
 
+#[cfg(unix)]
 use sandbox_runtime::config::{FilesystemConfig, NetworkConfig, SandboxRuntimeConfig};
+#[cfg(unix)]
 use sandbox_runtime::manager::SandboxManager;
 
+#[cfg(unix)]
 fn run_wrapped(wrapped: &sandbox_runtime::manager::WrappedCommand, extra_env: &[(String, String)]) -> (bool, String) {
     let sh = wrapped.as_shell().expect("unix wraps are shell-shaped").to_string();
     let mut cmd = std::process::Command::new("sh");
